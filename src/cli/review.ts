@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { ItchLibrary } from '../itch/library.ts';
+import { ItadClient } from '../itad/client.ts';
 import type { GameMatch } from '../itad/match.ts';
 import { LIBRARY_FILE, MATCHES_FILE, OVERRIDES_FILE } from '../paths.ts';
 import {
@@ -12,9 +13,14 @@ import {
   writeOverrides,
   type Decision,
 } from '../review/data.ts';
+import { parseItadRef, resolveSlug } from '../review/resolve.ts';
+import { requireEnv } from './env.ts';
 
-const PORT = 8081; // 8080 is reserved for the ITAD OAuth callback
+const PORT = Number(process.env.REVIEW_PORT ?? 8081); // 8080 is reserved for the ITAD OAuth callback
 const PAGE = new URL('../review/page.html', import.meta.url);
+
+const { ITAD_API_KEY } = requireEnv('ITAD_API_KEY');
+const itad = new ItadClient({ apiKey: ITAD_API_KEY });
 
 const library = JSON.parse(await readFile(LIBRARY_FILE, 'utf8')) as ItchLibrary;
 const { matches } = JSON.parse(await readFile(MATCHES_FILE, 'utf8')) as { matches: GameMatch[] };
@@ -51,6 +57,20 @@ const server = createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/items') {
       return json(res, 200, { items, overrides });
+    }
+    if (req.method === 'POST' && url.pathname === '/api/resolve') {
+      // Turns a pasted ITAD URL, slug or id into a game id.
+      const body = (await readBody(req)) as { input?: unknown };
+      const ref = typeof body?.input === 'string' ? parseItadRef(body.input) : undefined;
+      if (!ref) return json(res, 400, { error: 'Paste an ITAD game URL (…/game/<name>/info/), its name slug, or a game id' });
+      if (ref.kind === 'id') {
+        const info = await itad.gameInfo(ref.id).catch(() => undefined);
+        if (!info) return json(res, 404, { error: `No ITAD game with id ${ref.id}` });
+        return json(res, 200, { id: info.id, title: info.title, slug: info.slug });
+      }
+      const game = await resolveSlug(itad, ref.slug);
+      if (!game) return json(res, 404, { error: `Could not find ITAD game "${ref.slug}"` });
+      return json(res, 200, game);
     }
     if (req.method === 'POST' && url.pathname === '/api/decision') {
       const body = await readBody(req);

@@ -109,11 +109,12 @@ let items = [];
 let overrides = {};
 let focusIndex = 0;
 let visible = [];
+/** ITAD id → title for games accepted via a pasted URL, to show what was picked. */
+const resolvedTitles = {};
 
 const $ = (id) => document.getElementById(id);
 const ITAD_GAME = (slug) => `https://isthereanydeal.com/game/${encodeURIComponent(slug)}/info/`;
 const BOXART = (id) => `https://assets.isthereanydeal.com/${encodeURIComponent(id)}/boxart.jpg`;
-const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const REASONS = {
   'no-data': 'Needs review: short or generic title, ITAD has no developer data',
   multiple: 'Needs review: several candidates pass',
@@ -194,17 +195,29 @@ function candidateCard(item, c, index, chosenId) {
 
 function card(item, i) {
   const d = decisionOf(item);
-  const manual = h('input', { type: 'text', placeholder: 'Other ITAD game id (UUID)…', 'aria-label': 'ITAD game id' });
-  const submitManual = () => {
-    const id = manual.value.trim();
-    if (!UUID.test(id)) return toast('That is not an ITAD game id (UUID)', true);
-    decide(item, { itadId: id });
+  const manual = h('input', { type: 'text', placeholder: 'Other game: paste ITAD URL…', 'aria-label': 'ITAD game URL, slug or id' });
+  const submitManual = async () => {
+    const input = manual.value.trim();
+    if (!input) return;
+    try {
+      const res = await fetch('/api/resolve', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ input }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.error || res.statusText);
+      resolvedTitles[body.id] = body.title;
+      decide(item, { itadId: body.id });
+    } catch (e) {
+      toast(e.message, true);
+    }
   };
   manual.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitManual(); e.stopPropagation(); });
 
   const known = new Set(item.candidates.map((c) => c.id));
   const decisionText =
-    d.state === 'accepted' ? `Accepted${known.has(d.itadId) ? '' : ` (manual id ${d.itadId})`}` :
+    d.state === 'accepted' ? `Accepted${known.has(d.itadId) ? '' : `: ${resolvedTitles[d.itadId] ?? 'other game'} (${d.itadId})`}` :
     d.state === 'skipped' ? 'Skipped: will not be synced' :
     item.matchStatus === 'discarded' ? 'Discarded automatically: will not be synced unless you accept a candidate' : 'Undecided';
 
@@ -226,11 +239,11 @@ function card(item, i) {
       h('div', { class: `decision ${d.state === 'undecided' ? 'none' : d.state}` }, decisionText),
       item.candidates.length
         ? h('div', { class: 'cands' }, item.candidates.map((c, n) => candidateCard(item, c, n, d.itadId)))
-        : h('div', { class: 'none-found' }, 'No ITAD candidate found. Paste an ITAD game id below if you know it.'),
+        : h('div', { class: 'none-found' }, 'No ITAD candidate found. Paste an ITAD game page URL below if you know it.'),
       h('div', { class: 'actions' },
         h('button', { class: 'skip', onclick: () => decide(item, { itadId: null }) }, d.state === 'skipped' ? 'Skipped' : 'Skip (s)'),
         d.state !== 'undecided' ? h('button', { onclick: () => decide(item, { clear: true }) }, 'Undo (u)') : null,
-        h('div', { class: 'manual' }, manual, h('button', { onclick: submitManual }, 'Use id')),
+        h('div', { class: 'manual' }, manual, h('button', { onclick: submitManual }, 'Use this game')),
       ),
     ),
   );
