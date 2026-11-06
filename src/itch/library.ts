@@ -1,4 +1,5 @@
-import { ItchClient, mapWithConcurrency, pageUntilEmpty } from './client.ts';
+import { ItchClient } from './client.ts';
+import { mapWithConcurrency, pageUntilEmpty } from '../util.ts';
 import {
   BundleGamesPageSchema,
   OwnedBundlesSchema,

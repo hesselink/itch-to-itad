@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ItchClient, mapWithConcurrency, pageUntilEmpty } from '../../src/itch/client.ts';
+import { ItchClient } from '../../src/itch/client.ts';
+import { mapWithConcurrency, pageUntilEmpty } from '../../src/util.ts';
 import { buildLibrary, fetchLibrary } from '../../src/itch/library.ts';
 import { OwnedKeySchema, BundleGameSchema } from '../../src/itch/schemas.ts';
 
