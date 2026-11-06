@@ -102,3 +102,47 @@ export function itchSubdomain(url: string | undefined): string | undefined {
     return undefined;
   }
 }
+
+export type DistinctiveReason = 'symbols' | 'words' | 'long-words' | 'long-word';
+
+/**
+ * Whether a title is unusual enough that an identical title on ITAD is
+ * almost certainly the same game, even without developer data:
+ * - several symbols (",,,softfriends,,,", "[EN/ESP] The Tail Makes the Fox")
+ * - three or more words with at least 12 letters ("My Nuclear Octopus")
+ * - two long words (14+ letters, "Imperishable Memories")
+ * - one long word (12+ letters, "NeuraQuarium")
+ * Short or generic titles ("Octodad", "birdsong", "Cube") don't qualify.
+ */
+export function distinctiveTitle(title: string): DistinctiveReason | undefined {
+  return symbolDistinctive(title) ?? wordDistinctive(title);
+}
+
+function symbolDistinctive(title: string): 'symbols' | undefined {
+  const letters = titleTokens(title).join('').length;
+  const symbols = [...title].filter((c) => !/[\p{L}\p{N}\s]/u.test(c)).length;
+  return symbols >= 2 && letters >= 6 ? 'symbols' : undefined;
+}
+
+function wordDistinctive(title: string): Exclude<DistinctiveReason, 'symbols'> | undefined {
+  const tokens = titleTokens(title);
+  const letters = tokens.join('').length;
+  if (tokens.length >= 3 && letters >= 12) return 'words';
+  if (tokens.length === 2 && letters >= 14) return 'long-words';
+  if (tokens.length === 1 && letters >= 12) return 'long-word';
+  return undefined;
+}
+
+const exactish = (s: string) => s.trim().replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Accepts an itch/ITAD title pair as an unambiguous match when the itch title
+ * is distinctive and the titles are identical. When the symbols are what makes
+ * a title distinctive they must match exactly; word-based distinctiveness
+ * allows punctuation and ™ differences ("Pyramidal Break™" = "Pyramidal Break").
+ */
+export function distinctiveTitleMatch(itchTitle: string, itadTitle: string): DistinctiveReason | undefined {
+  if (exactish(itchTitle) === exactish(itadTitle)) return distinctiveTitle(itchTitle);
+  if (normaliseTitle(itchTitle) === normaliseTitle(itadTitle)) return wordDistinctive(itchTitle);
+  return undefined;
+}

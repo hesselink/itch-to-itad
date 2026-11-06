@@ -13,14 +13,18 @@ export interface ReviewItem {
   sources: string[];
   /** Status from the last match-itad run (before any new decisions). */
   matchStatus: GameMatch['status'];
-  /** Why it needs review, for filtering. */
-  reason: 'no-data' | 'mismatch' | 'multiple' | 'unmatched' | 'decided';
+  /**
+   * Why it is listed: needs review ('no-data', 'multiple'), was discarded
+   * automatically ('mismatch', 'no-candidate'), or was decided earlier.
+   */
+  reason: 'no-data' | 'multiple' | 'mismatch' | 'no-candidate' | 'decided';
   candidates: Candidate[];
 }
 
 /**
- * Games the user may want to decide on: everything in review or unmatched,
- * plus anything that already has an override (so earlier decisions show up).
+ * Games the user may want to decide on: everything in review, everything
+ * discarded automatically (in case the user wants to rescue one), plus
+ * anything that already has an override (so earlier decisions show up).
  */
 export function buildReviewItems(
   matches: readonly GameMatch[],
@@ -29,20 +33,20 @@ export function buildReviewItems(
 ): ReviewItem[] {
   const games = new Map(library.games.map((g) => [g.id, g]));
   return matches
-    .filter((m) => m.status === 'review' || m.status === 'unmatched' || String(m.itchId) in overrides)
+    .filter((m) => m.status === 'review' || m.status === 'discarded' || String(m.itchId) in overrides)
     .map((m) => {
       const g = games.get(m.itchId);
       const passing = m.candidates.filter((c) => c.companyMatch || c.sharedBundle);
       const reason: ReviewItem['reason'] =
-        m.status === 'unmatched'
-          ? 'unmatched'
-          : m.status !== 'review'
-            ? 'decided'
+        String(m.itchId) in overrides || (m.status !== 'review' && m.status !== 'discarded')
+          ? 'decided'
+          : m.status === 'discarded'
+            ? m.discardReason === 'developer-mismatch'
+              ? 'mismatch'
+              : 'no-candidate'
             : passing.length > 1
               ? 'multiple'
-              : m.candidates.every((c) => c.developers.length === 0 && c.publishers.length === 0)
-                ? 'no-data'
-                : 'mismatch';
+              : 'no-data';
       return {
         itchId: m.itchId,
         itchTitle: m.itchTitle,

@@ -63,8 +63,8 @@ describe('matchGames', () => {
     );
     const res = await matchGames(api, [itch(1, 'TUNIC', 'Finji'), itch(2, 'Ghost', 'tiny indie dev', 'tinyindie')]);
     expect(res[0]).toMatchObject({ status: 'confirmed', itadId: 'tunic-id', itadTitle: 'TUNIC', syncTitleSafe: true });
-    // The "Ghost" false positive is rejected by the developer check
-    expect(res[1]).toMatchObject({ status: 'review' });
+    // The "Ghost" false positive is rejected by the developer check and discarded
+    expect(res[1]).toMatchObject({ status: 'discarded', discardReason: 'developer-mismatch' });
     expect(res[1]!.candidates).toHaveLength(1);
     expect(res[1]!.candidates[0]!.companyMatch).toBe(false);
   });
@@ -85,7 +85,7 @@ describe('matchGames', () => {
     ]);
     expect(res[0]).toMatchObject({ status: 'confirmed', itadId: 'tens' });
     expect(res[0]!.candidates[0]).toMatchObject({ companyMatch: false, sharedBundle: 'Example Bundle' });
-    expect(res[1]).toMatchObject({ status: 'review' });
+    expect(res[1]).toMatchObject({ status: 'discarded', discardReason: 'developer-mismatch' });
   });
 
   it('skips the bundle lookup when the developer already confirms', async () => {
@@ -118,13 +118,13 @@ describe('matchGames', () => {
     expect(api.gameInfo).not.toHaveBeenCalledWith('hks');
   });
 
-  it('marks multiple passing candidates for review and missing games as unmatched', async () => {
+  it('marks multiple passing candidates for review and discards games without a candidate', async () => {
     // "Twin™" and its variant "Twin" resolve to two different ITAD games by the same dev.
     const api = fakeApi({ 'Twin™': 'b', Twin: 'a' }, [info('a', 'Twin', ['Dev']), info('b', 'Twin™', ['Dev'])]);
     const res = await matchGames(api, [itch(1, 'Twin™', 'Dev'), itch(2, 'Nothing Like This', 'Dev')]);
     expect(res[0]!.status).toBe('review');
     expect(res[0]!.candidates.map((c) => c.id).sort()).toEqual(['a', 'b']);
-    expect(res[1]!.status).toBe('unmatched');
+    expect(res[1]).toMatchObject({ status: 'discarded', discardReason: 'no-candidate' });
   });
 
   it('applies overrides: forcing a match or excluding a game', async () => {
@@ -151,6 +151,42 @@ describe('matchGames', () => {
     expect(summarise([r!]).syncTitleUnsafe).toBe(1);
   });
 
+  it('accepts identical distinctive titles without ITAD developer data', async () => {
+    const titles = [
+      ',,,softfriends,,,',
+      '"Gamer"+ Crossroad of Sympathy',
+      '(PC/OUYA) My Nuclear Octopus',
+      '[EN/ESP] The Tail Makes the Fox - Episode 1',
+      'Pyramidal Break™', // word-distinctive; ITAD title lacks the ™
+      'Octodad', // too short / generic
+      'Six Match', // two short words
+    ];
+    const itadTitle = (t: string) => (t === 'Pyramidal Break™' ? 'Pyramidal Break' : t);
+    const api = fakeApi(
+      Object.fromEntries(titles.map((t, i) => [t, `id${i}`])),
+      titles.map((t, i) => ({ ...info(`id${i}`, itadTitle(t), []), type: null })),
+    );
+    const res = await matchGames(api, titles.map((t, i) => itch(i, t, 'whoever')));
+    expect(res.map((r) => [r.itchTitle, r.status, r.candidates[0]?.distinctiveTitle])).toEqual([
+      [',,,softfriends,,,', 'confirmed', 'symbols'],
+      ['"Gamer"+ Crossroad of Sympathy', 'confirmed', 'symbols'],
+      ['(PC/OUYA) My Nuclear Octopus', 'confirmed', 'symbols'],
+      ['[EN/ESP] The Tail Makes the Fox - Episode 1', 'confirmed', 'symbols'],
+      ['Pyramidal Break™', 'confirmed', 'long-words'],
+      ['Octodad', 'review', undefined],
+      ['Six Match', 'review', undefined],
+    ]);
+  });
+
+  it('does not use the distinctive-title rule when ITAD has contradicting developer data', async () => {
+    const api = fakeApi(
+      { 'Daemon Detective Racing Zero': 'd' },
+      [info('d', 'Daemon Detective Racing Zero', ['Someone Else Entirely'])],
+    );
+    const [r] = await matchGames(api, [itch(1, 'Daemon Detective Racing Zero', 'whoever')]);
+    expect(r).toMatchObject({ status: 'discarded', discardReason: 'developer-mismatch' });
+  });
+
   it('only calls the API once per title/id thanks to the cache', async () => {
     const api = fakeApi({ A: 'a' }, [info('a', 'A', ['Dev'])]);
     await matchGames(api, [itch(1, 'A', 'Dev'), itch(2, 'A', 'Dev')]);
@@ -159,12 +195,18 @@ describe('matchGames', () => {
 });
 
 describe('reviewMarkdown', () => {
-  it('lists review and unmatched games with ITAD ids', async () => {
-    const api = fakeApi({ Ghost: 'other-ghost' }, [info('other-ghost', 'Ghost', ['AAA'])]);
-    const md = reviewMarkdown(await matchGames(api, [itch(1, 'Ghost', 'indie'), itch(2, 'Nope', 'indie')]));
+  it('lists review and discarded games', async () => {
+    const api = fakeApi(
+      { Ghost: 'other-ghost', Cube: 'cube' },
+      [info('other-ghost', 'Ghost', ['AAA']), { ...info('cube', 'Cube', []), type: null }],
+    );
+    const md = reviewMarkdown(
+      await matchGames(api, [itch(1, 'Ghost', 'indie'), itch(2, 'Nope', 'indie'), itch(3, 'Cube', 'indie')]),
+    );
     expect(md).toContain('## Review (1)');
-    expect(md).toContain('`other-ghost`');
-    expect(md).toContain('## Unmatched (1)');
+    expect(md).toContain('`cube`');
+    expect(md).toContain('## Discarded: developer mismatch (1)');
+    expect(md).toContain('## Discarded: no ITAD game (1)');
     expect(md).toContain('[Nope](https://indie.itch.io/g2)');
   });
 });

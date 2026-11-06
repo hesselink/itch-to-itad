@@ -31,7 +31,7 @@ console.log(`Games:      ${matches.length}`);
 console.log(`Confirmed:  ${s.confirmed}`);
 console.log(`Overrides:  ${s.override}`);
 console.log(`Review:     ${s.review}`);
-console.log(`Unmatched:  ${s.unmatched}`);
+console.log(`Discarded:  ${s.discarded} (no ITAD game or developer mismatch)`);
 console.log(`Excluded:   ${s.excluded}`);
 console.log(`  of matched, ambiguous ITAD title (direct copies): ${s.syncTitleUnsafe}`);
 console.log(`Wrote ${MATCHES_FILE} and ${REVIEW_FILE}`);

@@ -3,13 +3,29 @@ import type { ItchGame } from '../itch/library.ts';
 import { chunk, mapWithConcurrency } from '../util.ts';
 import { JsonCache } from './cache.ts';
 import type { ItadClient } from './client.ts';
-import { companiesMatch, itchSubdomain, titlesMatch, titleVariants } from './normalise.ts';
+import {
+  companiesMatch,
+  distinctiveTitleMatch,
+  itchSubdomain,
+  titlesMatch,
+  titleVariants,
+  type DistinctiveReason,
+} from './normalise.ts';
 import type { GameInfo, SearchResult } from './schemas.ts';
 
 /** The subset of ItadClient that matching needs (easy to fake in tests). */
 export type MatchApi = Pick<ItadClient, 'lookupTitles' | 'search' | 'gameInfo' | 'gameBundles'>;
 
-export type MatchStatus = 'confirmed' | 'override' | 'review' | 'unmatched' | 'excluded';
+/**
+ * - confirmed: one candidate passes a check (developer/publisher, shared
+ *   bundle, or distinctive identical title) → synced
+ * - override: decided by the user in data/itad-overrides.json → synced
+ * - review: needs a human decision (short/generic title, no ITAD data)
+ * - discarded: automatically left out (no candidate, or developer mismatch)
+ * - excluded: skipped by the user via an override of null
+ */
+export type MatchStatus = 'confirmed' | 'override' | 'review' | 'discarded' | 'excluded';
+export type DiscardReason = 'no-candidate' | 'developer-mismatch';
 
 export interface Candidate {
   id: string;
@@ -24,6 +40,8 @@ export interface Candidate {
   companyMatch: boolean;
   /** Title of an itch bundle that ITAD also lists this game in, if any. */
   sharedBundle?: string;
+  /** Set when accepted because the titles are identical and distinctive. */
+  distinctiveTitle?: DistinctiveReason;
 }
 
 export interface GameMatch {
@@ -33,6 +51,7 @@ export interface GameMatch {
   itchDeveloper?: string;
   itchPublishedAt?: string;
   status: MatchStatus;
+  discardReason?: DiscardReason;
   /** Set for confirmed and override. */
   itadId?: string;
   itadTitle?: string;
@@ -231,10 +250,28 @@ export async function matchGames(
     const passing = candidates.filter(
       (c) => (c.companyMatch || c.sharedBundle !== undefined) && (c.type === 'game' || c.type === null),
     );
-    if (passing.length === 1) {
-      return { ...base, status: 'confirmed', itadId: passing[0]!.id, itadTitle: passing[0]!.title, candidates };
+    const confirm = (c: Candidate) =>
+      ({ ...base, status: 'confirmed', itadId: c.id, itadTitle: c.title, candidates }) as const;
+    if (passing.length === 1) return confirm(passing[0]!);
+    if (passing.length > 1) return { ...base, status: 'review', candidates };
+    if (candidates.length === 0) {
+      return { ...base, status: 'discarded', discardReason: 'no-candidate', candidates };
     }
-    return { ...base, status: candidates.length > 0 ? 'review' : 'unmatched', candidates };
+    // Candidates whose developer/publisher data contradicts the itch developer
+    // are rejected; only candidates without any such data remain plausible.
+    const noData = candidates.filter((c) => c.developers.length === 0 && c.publishers.length === 0);
+    if (noData.length === 0) {
+      return { ...base, status: 'discarded', discardReason: 'developer-mismatch', candidates };
+    }
+    if (noData.length === 1) {
+      const c = noData[0]!;
+      const reason = distinctiveTitleMatch(g.title, c.title);
+      if (reason && (c.type === 'game' || c.type === null)) {
+        c.distinctiveTitle = reason;
+        return confirm(c);
+      }
+    }
+    return { ...base, status: 'review', candidates };
   });
 
   // 5. Check that ITAD's own title resolves back to the chosen game, so that
@@ -248,7 +285,7 @@ export async function matchGames(
 }
 
 export function summarise(matches: readonly GameMatch[]): Record<MatchStatus, number> & { syncTitleUnsafe: number } {
-  const counts = { confirmed: 0, override: 0, review: 0, unmatched: 0, excluded: 0, syncTitleUnsafe: 0 };
+  const counts = { confirmed: 0, override: 0, review: 0, discarded: 0, excluded: 0, syncTitleUnsafe: 0 };
   for (const m of matches) {
     counts[m.status]++;
     if (m.itadId && !m.syncTitleSafe) counts.syncTitleUnsafe++;
@@ -269,7 +306,7 @@ export function reviewMarkdown(matches: readonly GameMatch[]): string {
     '',
   ];
   const review = matches.filter((m) => m.status === 'review');
-  lines.push(`## Review (${review.length})`, '', 'Title matches, but developer/publisher did not confirm exactly one candidate.', '');
+  lines.push(`## Review (${review.length})`, '', 'Title matches, but nothing else confirms it: ITAD has no developer data and the title is short or generic, or several candidates pass.', '');
   lines.push('| itch id | itch game | itch developer | candidates (ITAD id — developers / publishers) |', '|---|---|---|---|');
   for (const m of review) {
     const cands = m.candidates
@@ -284,9 +321,14 @@ export function reviewMarkdown(matches: readonly GameMatch[]): string {
     const c = m.candidates.find((c) => c.id === m.itadId);
     lines.push(`| ${m.itchId} | [${md(m.itchTitle)}](${m.itchUrl}) | ${c ? itadLink(c) : m.itadId} |`);
   }
-  const unmatched = matches.filter((m) => m.status === 'unmatched');
-  lines.push('', `## Unmatched (${unmatched.length})`, '', 'No ITAD game with this title was found. Most are probably itch-only games.', '');
-  lines.push('| itch id | itch game | itch developer |', '|---|---|---|');
-  for (const m of unmatched) lines.push(`| ${m.itchId} | [${md(m.itchTitle)}](${m.itchUrl}) | ${md(m.itchDeveloper ?? '')} |`);
+  for (const [reason, heading, explanation] of [
+    ['developer-mismatch', 'Discarded: developer mismatch', 'ITAD has a game with this title, but by a different developer/publisher.'],
+    ['no-candidate', 'Discarded: no ITAD game', 'No ITAD game with this title was found. Most are probably itch-only games.'],
+  ] as const) {
+    const discarded = matches.filter((m) => m.status === 'discarded' && m.discardReason === reason);
+    lines.push('', `## ${heading} (${discarded.length})`, '', explanation, '');
+    lines.push('| itch id | itch game | itch developer |', '|---|---|---|');
+    for (const m of discarded) lines.push(`| ${m.itchId} | [${md(m.itchTitle)}](${m.itchUrl}) | ${md(m.itchDeveloper ?? '')} |`);
+  }
   return lines.join('\n') + '\n';
 }

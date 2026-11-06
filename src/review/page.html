@@ -85,11 +85,13 @@
   </label>
   <label>Reason
     <select id="f-reason">
+      <option value="needs-review">Needs review</option>
+      <option value="no-data">Needs review: short title, no ITAD data</option>
+      <option value="multiple">Needs review: multiple candidates</option>
+      <option value="mismatch">Discarded: developer mismatch</option>
+      <option value="no-candidate">Discarded: no ITAD game</option>
+      <option value="decided">Decided earlier</option>
       <option value="all">All</option>
-      <option value="no-data">ITAD has no developer data</option>
-      <option value="mismatch">Developer mismatch</option>
-      <option value="multiple">Multiple candidates</option>
-      <option value="unmatched">No candidate</option>
     </select>
   </label>
   <input type="search" id="f-search" placeholder="Search title or developer…">
@@ -112,7 +114,14 @@ const $ = (id) => document.getElementById(id);
 const ITAD_GAME = (slug) => `https://isthereanydeal.com/game/${encodeURIComponent(slug)}/info/`;
 const BOXART = (id) => `https://assets.isthereanydeal.com/${encodeURIComponent(id)}/boxart.jpg`;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const REASONS = { 'no-data': 'ITAD has no developer data', mismatch: 'Developer mismatch', multiple: 'Multiple candidates', unmatched: 'No candidate', decided: 'Decided earlier' };
+const REASONS = {
+  'no-data': 'Needs review: short or generic title, ITAD has no developer data',
+  multiple: 'Needs review: several candidates pass',
+  mismatch: 'Discarded automatically: ITAD developer differs',
+  'no-candidate': 'Discarded automatically: no ITAD game with this title',
+  decided: 'Decided earlier',
+};
+const NEEDS_REVIEW = new Set(['no-data', 'multiple']);
 
 /** Tiny DOM builder; text is always set via textContent, never parsed as HTML. */
 function h(tag, attrs = {}, ...children) {
@@ -196,7 +205,8 @@ function card(item, i) {
   const known = new Set(item.candidates.map((c) => c.id));
   const decisionText =
     d.state === 'accepted' ? `Accepted${known.has(d.itadId) ? '' : ` (manual id ${d.itadId})`}` :
-    d.state === 'skipped' ? 'Skipped: will not be synced' : 'Undecided';
+    d.state === 'skipped' ? 'Skipped: will not be synced' :
+    item.matchStatus === 'discarded' ? 'Discarded automatically: will not be synced unless you accept a candidate' : 'Undecided';
 
   return h('section', {
       class: `card ${d.state}` + (i === focusIndex ? ' focused' : ''),
@@ -233,7 +243,7 @@ function filtered() {
   return items.filter((item) => {
     const d = decisionOf(item).state;
     if (fd !== 'all' && d !== fd) return false;
-    if (fr !== 'all' && item.reason !== fr) return false;
+    if (fr === 'needs-review' ? !NEEDS_REVIEW.has(item.reason) : fr !== 'all' && item.reason !== fr) return false;
     if (q && !`${item.itchTitle} ${item.itchDeveloper || ''}`.toLowerCase().includes(q)) return false;
     return true;
   });

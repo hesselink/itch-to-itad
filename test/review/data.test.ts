@@ -17,8 +17,13 @@ const ID = '018d937f-62f2-705d-be60-33c317e9bf7e';
 const cand = (over: Partial<Candidate> = {}): Candidate => ({
   id: ID, slug: 's', title: 'T', type: null, developers: [], publishers: [], via: 'lookup', companyMatch: false, ...over,
 });
-const match = (itchId: number, status: GameMatch['status'], candidates: Candidate[] = []): GameMatch => ({
-  itchId, itchTitle: `Game ${itchId}`, itchUrl: `https://x.itch.io/${itchId}`, status, candidates,
+const match = (
+  itchId: number,
+  status: GameMatch['status'],
+  candidates: Candidate[] = [],
+  discardReason?: GameMatch['discardReason'],
+): GameMatch => ({
+  itchId, itchTitle: `Game ${itchId}`, itchUrl: `https://x.itch.io/${itchId}`, status, candidates, discardReason,
 });
 
 const library: ItchLibrary = {
@@ -30,13 +35,13 @@ const library: ItchLibrary = {
 };
 
 describe('buildReviewItems', () => {
-  it('includes review, unmatched and previously decided games, with a reason', () => {
+  it('includes review, discarded and previously decided games, with a reason', () => {
     const items = buildReviewItems(
       [
         match(1, 'review', [cand()]),
-        match(2, 'review', [cand({ developers: ['Someone'] })]),
+        match(2, 'discarded', [cand({ developers: ['Someone'] })], 'developer-mismatch'),
         match(3, 'review', [cand({ companyMatch: true }), cand({ id: 'b', sharedBundle: 'X' })]),
-        match(4, 'unmatched'),
+        match(4, 'discarded', [], 'no-candidate'),
         match(5, 'confirmed', [cand({ companyMatch: true })]),
         match(6, 'override', [cand()]),
       ],
@@ -44,7 +49,7 @@ describe('buildReviewItems', () => {
       { '6': ID },
     );
     expect(items.map((i) => [i.itchId, i.reason])).toEqual([
-      [1, 'no-data'], [2, 'mismatch'], [3, 'multiple'], [4, 'unmatched'], [6, 'decided'],
+      [1, 'no-data'], [2, 'mismatch'], [3, 'multiple'], [4, 'no-candidate'], [6, 'decided'],
     ]);
     expect(items[0]).toMatchObject({ coverUrl: 'c1', sources: ['Example Bundle', 'Owned key'] });
   });

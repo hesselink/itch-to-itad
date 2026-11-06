@@ -19,7 +19,7 @@ const matches = [
   match(2, 'override', 'b'),
   match(3, 'confirmed', 'c', false), // ambiguous ITAD title
   match(4, 'review'),
-  match(5, 'unmatched'),
+  match(5, 'discarded'),
   match(6, 'excluded'),
   match(7, 'confirmed', 'a'), // second itch game mapping to the same ITAD game
 ];

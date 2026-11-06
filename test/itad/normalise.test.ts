@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   companiesMatch,
+  distinctiveTitle,
+  distinctiveTitleMatch,
   itchSubdomain,
   normaliseCompany,
   normaliseTitle,
@@ -60,5 +62,26 @@ describe('companies', () => {
     expect(itchSubdomain('https://finji.itch.io')).toBe('finji');
     expect(itchSubdomain('https://example.com')).toBeUndefined();
     expect(itchSubdomain(undefined)).toBeUndefined();
+  });
+});
+
+describe('distinctive titles', () => {
+  it('classifies titles by how unusual they are', () => {
+    expect(distinctiveTitle(',,,softfriends,,,')).toBe('symbols');
+    expect(distinctiveTitle('Daemon Detective Racing Zero')).toBe('words');
+    expect(distinctiveTitle('Imperishable Memories')).toBe('long-words');
+    expect(distinctiveTitle('NeuraQuarium')).toBe('long-word');
+    for (const t of ['Octodad', 'birdsong', 'Cube', 'Six Match', 'C.M.Y.K', 'This Is Fine']) {
+      expect(distinctiveTitle(t), t).toBeUndefined();
+    }
+  });
+
+  it('requires identical titles, with symbols exact when they are what makes it distinctive', () => {
+    expect(distinctiveTitleMatch(',,,softfriends,,,', ',,,SoftFriends,,,')).toBe('symbols');
+    expect(distinctiveTitleMatch(',,,softfriends,,,', 'softfriends')).toBeUndefined();
+    expect(distinctiveTitleMatch("The Tops Don't Sting You!", "The Tops Don't Sting You")).toBe('words');
+    expect(distinctiveTitleMatch('Ouroboros: The Sacrifice', 'Ouroboros - The Sacrifice')).toBe('words');
+    expect(distinctiveTitleMatch('Daemon Detective Racing Zero', 'Daemon Detective Racing')).toBeUndefined();
+    expect(distinctiveTitleMatch('Octodad', 'Octodad')).toBeUndefined();
   });
 });
