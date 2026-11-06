@@ -7,7 +7,7 @@ import { companiesMatch, itchSubdomain, titlesMatch, titleVariants } from './nor
 import type { GameInfo, SearchResult } from './schemas.ts';
 
 /** The subset of ItadClient that matching needs (easy to fake in tests). */
-export type MatchApi = Pick<ItadClient, 'lookupTitles' | 'search' | 'gameInfo'>;
+export type MatchApi = Pick<ItadClient, 'lookupTitles' | 'search' | 'gameInfo' | 'gameBundles'>;
 
 export type MatchStatus = 'confirmed' | 'override' | 'review' | 'unmatched' | 'excluded';
 
@@ -20,7 +20,10 @@ export interface Candidate {
   developers: string[];
   publishers: string[];
   via: 'lookup' | 'search';
+  /** A developer/publisher matches the itch developer. */
   companyMatch: boolean;
+  /** Title of an itch bundle that ITAD also lists this game in, if any. */
+  sharedBundle?: string;
 }
 
 export interface GameMatch {
@@ -48,6 +51,8 @@ export interface MatchCaches {
   lookup: JsonCache<string | null>;
   search: JsonCache<SearchResult[]>;
   info: JsonCache<GameInfo | null>;
+  /** ITAD game id → itch bundle ids ITAD lists it in. */
+  bundles: JsonCache<number[]>;
 }
 
 export function memoryCaches(): MatchCaches {
@@ -55,6 +60,7 @@ export function memoryCaches(): MatchCaches {
     lookup: new JsonCache(undefined, 'lookup'),
     search: new JsonCache(undefined, 'search'),
     info: new JsonCache(undefined, 'info'),
+    bundles: new JsonCache(undefined, 'bundles'),
   };
 }
 
@@ -63,6 +69,7 @@ export function diskCaches(dir: string): MatchCaches {
     lookup: new JsonCache(dir, 'lookup-title'),
     search: new JsonCache(dir, 'search'),
     info: new JsonCache(dir, 'game-info'),
+    bundles: new JsonCache(dir, 'game-bundles'),
   };
 }
 
@@ -70,7 +77,13 @@ const saveAll = (c: MatchCaches) => {
   c.lookup.save();
   c.search.save();
   c.info.save();
+  c.bundles.save();
 };
+
+const ITCH_BUNDLE_URL = /^https?:\/\/itch\.io\/b\/(\d+)\//;
+
+const itchBundleIds = (g: ItchGame) =>
+  new Map(g.sources.flatMap((s) => (s.type === 'bundle' ? [[s.bundleId, s.bundleTitle] as const] : [])));
 
 const LOOKUP_BATCH = 200;
 const SEARCH_RESULTS = 10;
@@ -148,6 +161,33 @@ export async function matchGames(
   });
   caches.info.save();
 
+  // 3b. For games whose candidates aren't confirmed by developer/publisher,
+  //     check whether ITAD lists the candidate in an itch bundle the game
+  //     came from. That is strong evidence it's the same game.
+  const companyConfirmed = (g: ItchGame, id: string) => {
+    const info = caches.info.get(id);
+    return !!info && companiesMatch(itchCompanyNames(g), [...info.developers, ...info.publishers].map((d) => d.name));
+  };
+  const needBundles = new Set<string>();
+  for (const g of toMatch) {
+    if (itchBundleIds(g).size === 0) continue;
+    const ids = [...candidateIds.get(g.id)!.keys()].filter((id) => caches.info.get(id));
+    if (ids.some((id) => companyConfirmed(g, id))) continue;
+    for (const id of ids) needBundles.add(id);
+  }
+  let bundlesFetched = 0;
+  await mapWithConcurrency([...needBundles], concurrency, async (id) => {
+    await caches.bundles.getOrFetch(id, async () => {
+      const bundles = await api.gameBundles(id);
+      return bundles.flatMap((b) => {
+        const m = ITCH_BUNDLE_URL.exec(b.url);
+        return m ? [Number(m[1])] : [];
+      });
+    });
+    if (++bundlesFetched % 100 === 0) log(`game bundles: ${bundlesFetched}/${needBundles.size}`);
+  });
+  caches.bundles.save();
+
   // 4. Classify.
   const results: GameMatch[] = games.map((g) => {
     const base = {
@@ -158,11 +198,13 @@ export async function matchGames(
       itchPublishedAt: g.publishedAt,
     };
     const itchNames = itchCompanyNames(g);
+    const ownBundles = itchBundleIds(g);
     const toCandidate = (id: string, via: Candidate['via']): Candidate | undefined => {
       const info = caches.info.get(id);
       if (!info) return undefined;
       const developers = info.developers.map((d) => d.name);
       const publishers = info.publishers.map((p) => p.name);
+      const shared = (caches.bundles.get(id) ?? []).find((b) => ownBundles.has(b));
       return {
         id,
         slug: info.slug,
@@ -173,6 +215,7 @@ export async function matchGames(
         publishers,
         via,
         companyMatch: companiesMatch(itchNames, [...developers, ...publishers]),
+        sharedBundle: shared === undefined ? undefined : ownBundles.get(shared),
       };
     };
 
@@ -185,7 +228,9 @@ export async function matchGames(
     }
 
     const candidates = [...candidateIds.get(g.id)!].flatMap(([id, via]) => toCandidate(id, via) ?? []);
-    const passing = candidates.filter((c) => c.companyMatch && (c.type === 'game' || c.type === null));
+    const passing = candidates.filter(
+      (c) => (c.companyMatch || c.sharedBundle !== undefined) && (c.type === 'game' || c.type === null),
+    );
     if (passing.length === 1) {
       return { ...base, status: 'confirmed', itadId: passing[0]!.id, itadTitle: passing[0]!.title, candidates };
     }
@@ -228,7 +273,7 @@ export function reviewMarkdown(matches: readonly GameMatch[]): string {
   lines.push('| itch id | itch game | itch developer | candidates (ITAD id — developers / publishers) |', '|---|---|---|---|');
   for (const m of review) {
     const cands = m.candidates
-      .map((c) => `${itadLink(c)} \`${c.id}\` — ${md(c.developers.join(', ') || '?')} / ${md(c.publishers.join(', ') || '?')}${c.releaseDate ? ` (${c.releaseDate.slice(0, 4)})` : ''}${c.companyMatch ? ' ✅' : ''}`)
+      .map((c) => `${itadLink(c)} \`${c.id}\` — ${md(c.developers.join(', ') || '?')} / ${md(c.publishers.join(', ') || '?')}${c.releaseDate ? ` (${c.releaseDate.slice(0, 4)})` : ''}${c.companyMatch ? ' ✅ developer' : ''}${c.sharedBundle ? ` ✅ in ${md(c.sharedBundle)}` : ''}`)
       .join('<br>');
     lines.push(`| ${m.itchId} | [${md(m.itchTitle)}](${m.itchUrl}) | ${md(m.itchDeveloper ?? '')} | ${cands} |`);
   }

@@ -4,7 +4,13 @@ import type { ItchGame } from '../../src/itch/library.ts';
 import { matchGames, reviewMarkdown, summarise, type MatchApi } from '../../src/itad/match.ts';
 import type { GameInfo, SearchResult } from '../../src/itad/schemas.ts';
 
-const itch = (id: number, title: string, developer: string, sub = developer.toLowerCase()): ItchGame => ({
+const itch = (
+  id: number,
+  title: string,
+  developer: string,
+  sub = developer.toLowerCase(),
+  bundles: [number, string][] = [],
+): ItchGame => ({
   id,
   title,
   url: `https://${sub}.itch.io/g${id}`,
@@ -12,7 +18,7 @@ const itch = (id: number, title: string, developer: string, sub = developer.toLo
   developerUrl: `https://${sub}.itch.io`,
   classification: 'game',
   platforms: [],
-  sources: [],
+  sources: bundles.map(([bundleId, bundleTitle]) => ({ type: 'bundle' as const, bundleId, bundleTitle })),
 });
 
 const info = (id: string, title: string, developers: string[], publishers: string[] = [], type = 'game'): GameInfo => ({
@@ -29,6 +35,7 @@ function fakeApi(
   titles: Record<string, string>,
   infos: GameInfo[],
   searches: Record<string, SearchResult[]> = {},
+  bundleUrls: Record<string, string[]> = {},
 ) {
   const byId = new Map(infos.map((i) => [i.id, i]));
   return {
@@ -39,6 +46,9 @@ function fakeApi(
       if (!i) throw new HttpError(404, id, 'not found');
       return i;
     }),
+    gameBundles: vi.fn(async (id: string) =>
+      (bundleUrls[id] ?? []).map((url, i) => ({ id: i, title: `Bundle ${i}`, url })),
+    ),
   } satisfies MatchApi;
 }
 
@@ -57,6 +67,31 @@ describe('matchGames', () => {
     expect(res[1]).toMatchObject({ status: 'review' });
     expect(res[1]!.candidates).toHaveLength(1);
     expect(res[1]!.candidates[0]!.companyMatch).toBe(false);
+  });
+
+  it('confirms via a shared itch bundle when the developer names differ', async () => {
+    const api = fakeApi(
+      { '10S': 'tens', Other: 'other' },
+      [info('tens', '10S', ['Old Bear Games']), info('other', 'Other', ['Someone Else'])],
+      {},
+      {
+        tens: ['https://itch.io/b/1001/example-bundle', 'https://www.humblebundle.com/x'],
+        other: ['https://itch.io/b/999/unrelated-bundle'],
+      },
+    );
+    const res = await matchGames(api, [
+      itch(1, '10S', 'owch', 'owch', [[1001, 'Example Bundle']]),
+      itch(2, 'Other', 'owch', 'owch', [[1001, 'Example Bundle']]),
+    ]);
+    expect(res[0]).toMatchObject({ status: 'confirmed', itadId: 'tens' });
+    expect(res[0]!.candidates[0]).toMatchObject({ companyMatch: false, sharedBundle: 'Example Bundle' });
+    expect(res[1]).toMatchObject({ status: 'review' });
+  });
+
+  it('skips the bundle lookup when the developer already confirms', async () => {
+    const api = fakeApi({ TUNIC: 'tunic-id' }, [info('tunic-id', 'TUNIC', [], ['Finji'])]);
+    await matchGames(api, [itch(1, 'TUNIC', 'Finji', 'finji', [[1002, 'Another Bundle']])]);
+    expect(api.gameBundles).not.toHaveBeenCalled();
   });
 
   it('uses title variants for the exact lookup', async () => {

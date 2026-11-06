@@ -34,6 +34,17 @@ export const SearchResultSchema = z.array(
 );
 export type SearchResult = z.infer<typeof SearchResultSchema>[number];
 
+/** Response of /games/bundles/v2: bundles that contained the game. */
+export const GameBundlesSchema = z.array(
+  z.object({
+    id: z.number(),
+    title: z.string(),
+    url: z.string(),
+    page: z.object({ id: z.number(), name: z.string() }).optional(),
+  }),
+);
+export type GameBundle = z.infer<typeof GameBundlesSchema>[number];
+
 export const CollectionGamesSchema = z.array(
   z.object({
     id: GameIdSchema,

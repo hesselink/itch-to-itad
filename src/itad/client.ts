@@ -5,6 +5,7 @@ import {
   AnySchema,
   CollectionGamesSchema,
   CopiesSchema,
+  GameBundlesSchema,
   GameInfoSchema,
   LinkProfileSchema,
   SearchResultSchema,
@@ -74,6 +75,12 @@ export class ItadClient {
 
   gameInfo(id: string) {
     return this.#request('GET', `/games/info/v2?id=${encodeURIComponent(id)}`, GameInfoSchema);
+  }
+
+  /** All bundles (including expired) that contained the game. */
+  gameBundles(id: string) {
+    const q = new URLSearchParams({ id, expired: 'true' });
+    return this.#request('GET', `/games/bundles/v2?${q}`, GameBundlesSchema);
   }
 
   search(title: string, results = 10) {
