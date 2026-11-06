@@ -80,3 +80,11 @@ export const BundleGamesPageSchema = z.object({
   per_page: z.number(),
   bundle_games: itchArray(BundleGameSchema),
 });
+
+export const ProfileSchema = z.object({
+  user: z.object({
+    id: z.number(),
+    username: z.string(),
+    display_name: z.string().optional(),
+  }),
+});
