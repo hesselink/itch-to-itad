@@ -10,6 +10,7 @@
     "fetch-itch": "node --env-file-if-exists=.env src/cli/fetch-itch.ts",
     "itad-login": "node --env-file-if-exists=.env src/cli/itad-login.ts",
     "match-itad": "node --env-file-if-exists=.env src/cli/match-itad.ts",
+    "review": "node --env-file-if-exists=.env src/cli/review.ts",
     "sync-itad": "node --env-file-if-exists=.env src/cli/sync-itad.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>itch → ITAD review</title>
+<style>
+  :root {
+    --bg: #f6f6f4; --card: #fff; --fg: #1d1d1b; --muted: #6b6b66; --line: #e2e2dd;
+    --accent: #2f6fdd; --ok: #1f8a4c; --ok-bg: #e7f5ec; --skip: #8a5a1f; --skip-bg: #f7efe3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #161615; --card: #20201f; --fg: #ecece8; --muted: #9a9a93; --line: #34342f;
+      --accent: #6f9dff; --ok: #5fcf8c; --ok-bg: #1d3326; --skip: #e0a860; --skip-bg: #3a2e1d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; font: 14px/1.4 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  header {
+    position: sticky; top: 0; z-index: 1; background: var(--bg); border-bottom: 1px solid var(--line);
+    padding: 10px 16px; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+  }
+  header h1 { font-size: 16px; margin: 0 8px 0 0; }
+  header label { color: var(--muted); }
+  select, input[type=search], input[type=text] {
+    font: inherit; color: inherit; background: var(--card); border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px;
+  }
+  .counts { margin-left: auto; color: var(--muted); }
+  .counts b { color: var(--fg); }
+  .help { width: 100%; color: var(--muted); font-size: 12px; }
+  kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-radius: 4px; padding: 0 4px; background: var(--card); }
+  main { max-width: 1100px; margin: 0 auto; padding: 12px 16px 80px; }
+  .card {
+    display: grid; grid-template-columns: 280px 1fr; gap: 16px; background: var(--card);
+    border: 1px solid var(--line); border-left: 4px solid var(--line); border-radius: 8px; padding: 12px; margin-bottom: 10px;
+  }
+  .card.focused { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .card.accepted { border-left-color: var(--ok); }
+  .card.skipped { border-left-color: var(--skip); }
+  .itch img, .cand img { width: 100%; aspect-ratio: 315 / 250; object-fit: cover; border-radius: 4px; background: var(--line); display: block; }
+  .itch h2 { font-size: 15px; margin: 8px 0 2px; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); font-size: 12px; }
+  .tag { display: inline-block; font-size: 11px; padding: 1px 6px; border-radius: 10px; background: var(--bg); border: 1px solid var(--line); margin: 2px 2px 0 0; }
+  .tag.good { color: var(--ok); border-color: var(--ok); }
+  .right { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .decision { font-size: 12px; font-weight: 600; }
+  .decision.accepted { color: var(--ok); } .decision.skipped { color: var(--skip); } .decision.none { color: var(--muted); }
+  .cands { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .cand { border: 1px solid var(--line); border-radius: 6px; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+  .cand.chosen { border-color: var(--ok); background: var(--ok-bg); }
+  .cand .title { font-weight: 600; overflow-wrap: anywhere; }
+  .cand .id { font: 11px ui-monospace, monospace; color: var(--muted); overflow-wrap: anywhere; }
+  .none-found { color: var(--muted); font-style: italic; }
+  .actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: auto; }
+  button {
+    font: inherit; font-size: 13px; cursor: pointer; border-radius: 6px; padding: 4px 10px;
+    border: 1px solid var(--line); background: var(--bg); color: var(--fg);
+  }
+  button:hover { border-color: var(--accent); }
+  button.accept { border-color: var(--ok); color: var(--ok); }
+  button.skip { border-color: var(--skip); color: var(--skip); }
+  .manual { display: flex; gap: 6px; }
+  .manual input { flex: 1; min-width: 0; font: 12px ui-monospace, monospace; }
+  #toast {
+    position: fixed; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg);
+    padding: 6px 14px; border-radius: 6px; opacity: 0; transition: opacity .2s; pointer-events: none;
+  }
+  #toast.show { opacity: .92; }
+  #toast.error { background: #c0392b; color: #fff; }
+  .empty { text-align: center; color: var(--muted); padding: 40px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>itch → ITAD review</h1>
+  <label>Show
+    <select id="f-decision">
+      <option value="undecided">Undecided</option>
+      <option value="accepted">Accepted</option>
+      <option value="skipped">Skipped</option>
+      <option value="all">All</option>
+    </select>
+  </label>
+  <label>Reason
+    <select id="f-reason">
+      <option value="all">All</option>
+      <option value="no-data">ITAD has no developer data</option>
+      <option value="mismatch">Developer mismatch</option>
+      <option value="multiple">Multiple candidates</option>
+      <option value="unmatched">No candidate</option>
+    </select>
+  </label>
+  <input type="search" id="f-search" placeholder="Search title or developer…">
+  <span class="counts" id="counts"></span>
+  <div class="help">
+    <kbd>j</kbd>/<kbd>k</kbd> next/previous · <kbd>1</kbd>–<kbd>9</kbd> accept candidate · <kbd>s</kbd> skip game ·
+    <kbd>u</kbd> undo decision · <kbd>/</kbd> search. Decisions are saved immediately to <code>data/itad-overrides.json</code>.
+  </div>
+</header>
+<main id="list"></main>
+<div id="toast"></div>
+<script>
+'use strict';
+let items = [];
+let overrides = {};
+let focusIndex = 0;
+let visible = [];
+
+const $ = (id) => document.getElementById(id);
+const ITAD_GAME = (slug) => `https://isthereanydeal.com/game/${encodeURIComponent(slug)}/info/`;
+const BOXART = (id) => `https://assets.isthereanydeal.com/${encodeURIComponent(id)}/boxart.jpg`;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REASONS = { 'no-data': 'ITAD has no developer data', mismatch: 'Developer mismatch', multiple: 'Multiple candidates', unmatched: 'No candidate', decided: 'Decided earlier' };
+
+/** Tiny DOM builder; text is always set via textContent, never parsed as HTML. */
+function h(tag, attrs = {}, ...children) {
+  const el = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (v === undefined || v === null || v === false) continue;
+    if (k === 'class') el.className = v;
+    else if (k.startsWith('on')) el.addEventListener(k.slice(2), v);
+    else el.setAttribute(k, v === true ? '' : v);
+  }
+  for (const c of children.flat()) if (c !== null && c !== undefined && c !== false) el.append(c instanceof Node ? c : String(c));
+  return el;
+}
+
+const decisionOf = (item) => {
+  const key = String(item.itchId);
+  if (!(key in overrides)) return { state: 'undecided' };
+  return overrides[key] === null ? { state: 'skipped' } : { state: 'accepted', itadId: overrides[key] };
+};
+
+function toast(message, error = false) {
+  const t = $('toast');
+  t.textContent = message;
+  t.className = 'show' + (error ? ' error' : '');
+  clearTimeout(toast.timer);
+  toast.timer = setTimeout(() => (t.className = ''), 1600);
+}
+
+async function decide(item, decision) {
+  try {
+    const res = await fetch('/api/decision', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ itchId: item.itchId, ...decision }),
+    });
+    const body = await res.json();
+    if (!res.ok) throw new Error(body.error || res.statusText);
+    overrides = body.overrides;
+    toast('clear' in decision ? `Cleared: ${item.itchTitle}` : decision.itadId === null ? `Skipped: ${item.itchTitle}` : `Accepted: ${item.itchTitle}`);
+    render(false);
+  } catch (e) {
+    toast(`Not saved: ${e.message}`, true);
+  }
+}
+
+function candidateCard(item, c, index, chosenId) {
+  const badges = [
+    c.companyMatch ? h('span', { class: 'tag good' }, 'developer matches') : null,
+    c.sharedBundle ? h('span', { class: 'tag good' }, `in ${c.sharedBundle}`) : null,
+    c.type && c.type !== 'game' ? h('span', { class: 'tag' }, c.type) : null,
+    h('span', { class: 'tag' }, `via ${c.via}`),
+  ];
+  const people = [
+    c.developers.length ? `Dev: ${c.developers.join(', ')}` : null,
+    c.publishers.length ? `Pub: ${c.publishers.join(', ')}` : null,
+  ].filter(Boolean);
+  return h('div', { class: 'cand' + (chosenId === c.id ? ' chosen' : '') },
+    h('a', { href: ITAD_GAME(c.slug), target: '_blank', rel: 'noopener' },
+      h('img', { src: BOXART(c.id), alt: '', loading: 'lazy', onerror: (e) => (e.target.style.visibility = 'hidden') })),
+    h('a', { class: 'title', href: ITAD_GAME(c.slug), target: '_blank', rel: 'noopener' }, c.title),
+    h('div', { class: 'meta' }, people.length ? people.join(' · ') : 'No developer/publisher data'),
+    c.releaseDate ? h('div', { class: 'meta' }, `Released ${c.releaseDate}`) : null,
+    h('div', {}, badges),
+    h('div', { class: 'id' }, c.id),
+    h('div', { class: 'actions' },
+      h('button', { class: 'accept', onclick: () => decide(item, { itadId: c.id }) },
+        chosenId === c.id ? 'Accepted' : `Accept${index < 9 ? ` (${index + 1})` : ''}`)),
+  );
+}
+
+function card(item, i) {
+  const d = decisionOf(item);
+  const manual = h('input', { type: 'text', placeholder: 'Other ITAD game id (UUID)…', 'aria-label': 'ITAD game id' });
+  const submitManual = () => {
+    const id = manual.value.trim();
+    if (!UUID.test(id)) return toast('That is not an ITAD game id (UUID)', true);
+    decide(item, { itadId: id });
+  };
+  manual.addEventListener('keydown', (e) => { if (e.key === 'Enter') submitManual(); e.stopPropagation(); });
+
+  const known = new Set(item.candidates.map((c) => c.id));
+  const decisionText =
+    d.state === 'accepted' ? `Accepted${known.has(d.itadId) ? '' : ` (manual id ${d.itadId})`}` :
+    d.state === 'skipped' ? 'Skipped: will not be synced' : 'Undecided';
+
+  return h('section', {
+      class: `card ${d.state}` + (i === focusIndex ? ' focused' : ''),
+      'data-index': i,
+      onclick: () => { focusIndex = i; markFocus(false); },
+    },
+    h('div', { class: 'itch' },
+      h('a', { href: item.itchUrl, target: '_blank', rel: 'noopener' },
+        h('img', { src: item.coverUrl || '', alt: '', loading: 'lazy', onerror: (e) => (e.target.style.visibility = 'hidden') })),
+      h('h2', {}, h('a', { href: item.itchUrl, target: '_blank', rel: 'noopener' }, item.itchTitle)),
+      h('div', { class: 'meta' }, item.itchDeveloper || 'Unknown developer',
+        item.itchPublishedAt ? ` · itch page ${item.itchPublishedAt.slice(0, 4)}` : ''),
+      h('div', {}, item.sources.map((s) => h('span', { class: 'tag' }, s))),
+      h('div', { class: 'meta' }, REASONS[item.reason] || item.reason),
+    ),
+    h('div', { class: 'right' },
+      h('div', { class: `decision ${d.state === 'undecided' ? 'none' : d.state}` }, decisionText),
+      item.candidates.length
+        ? h('div', { class: 'cands' }, item.candidates.map((c, n) => candidateCard(item, c, n, d.itadId)))
+        : h('div', { class: 'none-found' }, 'No ITAD candidate found. Paste an ITAD game id below if you know it.'),
+      h('div', { class: 'actions' },
+        h('button', { class: 'skip', onclick: () => decide(item, { itadId: null }) }, d.state === 'skipped' ? 'Skipped' : 'Skip (s)'),
+        d.state !== 'undecided' ? h('button', { onclick: () => decide(item, { clear: true }) }, 'Undo (u)') : null,
+        h('div', { class: 'manual' }, manual, h('button', { onclick: submitManual }, 'Use id')),
+      ),
+    ),
+  );
+}
+
+function filtered() {
+  const fd = $('f-decision').value;
+  const fr = $('f-reason').value;
+  const q = $('f-search').value.trim().toLowerCase();
+  return items.filter((item) => {
+    const d = decisionOf(item).state;
+    if (fd !== 'all' && d !== fd) return false;
+    if (fr !== 'all' && item.reason !== fr) return false;
+    if (q && !`${item.itchTitle} ${item.itchDeveloper || ''}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function render(resetFocus = true) {
+  visible = filtered();
+  if (resetFocus) focusIndex = 0;
+  focusIndex = Math.max(0, Math.min(focusIndex, visible.length - 1));
+  const list = $('list');
+  list.replaceChildren(...(visible.length ? visible.map(card) : [h('div', { class: 'empty' }, 'Nothing to show with these filters.')]));
+  const states = items.map((i) => decisionOf(i).state);
+  const n = (s) => states.filter((x) => x === s).length;
+  $('counts').replaceChildren(
+    'Showing ', h('b', {}, visible.length), ' · undecided ', h('b', {}, n('undecided')),
+    ' · accepted ', h('b', {}, n('accepted')), ' · skipped ', h('b', {}, n('skipped')),
+  );
+  markFocus(false);
+}
+
+function markFocus(scroll = true) {
+  document.querySelectorAll('.card.focused').forEach((el) => el.classList.remove('focused'));
+  const el = document.querySelector(`.card[data-index="${focusIndex}"]`);
+  if (!el) return;
+  el.classList.add('focused');
+  if (scroll) {
+    const top = el.getBoundingClientRect().top - document.querySelector('header').offsetHeight - 8;
+    window.scrollBy({ top, behavior: 'smooth' });
+  }
+}
+
+document.addEventListener('keydown', (e) => {
+  if (e.target.matches('input, select, textarea') || e.metaKey || e.ctrlKey || e.altKey) {
+    if (e.key === 'Escape') e.target.blur();
+    return;
+  }
+  const item = visible[focusIndex];
+  if (e.key === 'j') { focusIndex = Math.min(focusIndex + 1, visible.length - 1); markFocus(); }
+  else if (e.key === 'k') { focusIndex = Math.max(focusIndex - 1, 0); markFocus(); }
+  else if (e.key === '/') { e.preventDefault(); $('f-search').focus(); }
+  else if (!item) return;
+  else if (/^[1-9]$/.test(e.key)) {
+    const c = item.candidates[Number(e.key) - 1];
+    if (c) decide(item, { itadId: c.id });
+  }
+  else if (e.key === 's') decide(item, { itadId: null });
+  else if (e.key === 'u') decide(item, { clear: true });
+});
+
+for (const id of ['f-decision', 'f-reason']) $(id).addEventListener('change', () => render());
+$('f-search').addEventListener('input', () => render());
+
+fetch('/api/items').then((r) => r.json()).then((data) => {
+  items = data.items;
+  overrides = data.overrides;
+  render();
+}).catch((e) => toast(`Could not load: ${e.message}`, true));
+</script>
+</body>
+</html>
