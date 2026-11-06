@@ -32,13 +32,17 @@ export function titlesMatch(a: string, b: string): boolean {
   return normaliseTitle(a) === normaliseTitle(b) || titleSimilarity(a, b) >= TITLE_SIMILARITY_THRESHOLD;
 }
 
+// Only qualifiers that name the same game. Demo, prototype, early access,
+// alpha/beta and jam versions are deliberately NOT stripped: on itch those are
+// usually separate, different builds (e.g. "Dorfromantik (Prototype)" is not
+// the full Steam game).
 const TRAILING_QUALIFIERS =
-  /\s*[-–—:]?\s*[([]?\s*(?:demo|free demo|early access|alpha|beta|prototype|jam version|jam edition|game jam version|deluxe edition|definitive edition|complete edition|director'?s cut|remastered|pc version|windows version)\s*[)\]]?\s*$/i;
+  /\s*[-–—:]?\s*[([]?\s*(?:deluxe edition|definitive edition|complete edition|director'?s cut|pc version|windows version)\s*[)\]]?\s*$/i;
 
 /**
  * Title variants to try with ITAD's exact-title lookup: the original, one
  * without trademark symbols / fancy quotes, and one without trailing
- * qualifiers like "(Demo)" or "- Early Access".
+ * edition qualifiers like "- Deluxe Edition".
  */
 export function titleVariants(title: string): string[] {
   const cleaned = title

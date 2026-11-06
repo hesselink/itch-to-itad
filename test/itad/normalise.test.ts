@@ -24,11 +24,17 @@ describe('titles', () => {
 
   it('produces lookup variants without symbols and trailing qualifiers', () => {
     expect(titleVariants('Celeste™')).toEqual(['Celeste™', 'Celeste']);
-    expect(titleVariants('Some Game (Demo)')).toEqual(['Some Game (Demo)', 'Some Game']);
-    expect(titleVariants('Some Game - Early Access')).toEqual(['Some Game - Early Access', 'Some Game']);
+    expect(titleVariants('Some Game - Deluxe Edition')).toEqual(['Some Game - Deluxe Edition', 'Some Game']);
+    expect(titleVariants("Some Game (Director's Cut)")).toEqual(["Some Game (Director's Cut)", 'Some Game']);
     expect(titleVariants('Plain')).toEqual(['Plain']);
     // A title that is only a qualifier is kept as is
-    expect(titleVariants('Demo')).toEqual(['Demo']);
+    expect(titleVariants('Deluxe Edition')).toEqual(['Deluxe Edition']);
+  });
+
+  it('keeps demo/prototype/early access qualifiers, since those are different builds', () => {
+    for (const t of ['Dorfromantik (Prototype)', 'Some Game (Demo)', 'Some Game - Early Access', 'Some Game [Jam Version]', 'Some Game Beta']) {
+      expect(titleVariants(t)).toEqual([t]);
+    }
   });
 });
 

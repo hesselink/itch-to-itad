@@ -119,9 +119,9 @@ describe('matchGames', () => {
   });
 
   it('marks multiple passing candidates for review and missing games as unmatched', async () => {
-    // "Twin (Demo)" and its variant "Twin" resolve to two different ITAD games by the same dev.
-    const api = fakeApi({ 'Twin (Demo)': 'b', Twin: 'a' }, [info('a', 'Twin', ['Dev']), info('b', 'Twin (Demo)', ['Dev'])]);
-    const res = await matchGames(api, [itch(1, 'Twin (Demo)', 'Dev'), itch(2, 'Nothing Like This', 'Dev')]);
+    // "Twin™" and its variant "Twin" resolve to two different ITAD games by the same dev.
+    const api = fakeApi({ 'Twin™': 'b', Twin: 'a' }, [info('a', 'Twin', ['Dev']), info('b', 'Twin™', ['Dev'])]);
+    const res = await matchGames(api, [itch(1, 'Twin™', 'Dev'), itch(2, 'Nothing Like This', 'Dev')]);
     expect(res[0]!.status).toBe('review');
     expect(res[0]!.candidates.map((c) => c.id).sort()).toEqual(['a', 'b']);
     expect(res[1]!.status).toBe('unmatched');
